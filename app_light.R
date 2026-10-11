@@ -1,4 +1,4 @@
-# 감리사 기출 CBT - 연도 선택형 (정답파일 answer_key.csv 사용)
+# 감리사 기출 CBT - 문제별 영구 메모 + 이미지 캐시 (고정 answer_key.csv 사용)
 # 사용: app.R, answer_key.csv, 연도별 PDF를 같은 폴더에 둔 뒤 shiny::runApp()
 # 권장: 2015년_CBT_정답표시제거.pdf 같은 '정답표시제거' PDF를 같은 폴더에 두면
 #       앱이 원본보다 우선 사용하여, 문제 화면에서 굵은 정답 표시를 숨깁니다.
@@ -16,6 +16,34 @@ out_dir <- file.path(app_dir, 'www', 'auto_questions')
 dir.create(out_dir, recursive = TRUE, showWarnings = FALSE)
 
 circle_labels <- c('①','②','③','④')
+
+# 메모는 (연도, 문제번호)를 키로 app_light.R 옆에 저장됩니다.
+# PDF 및 이미지 캐시와 무관하게 보존됩니다.
+memo_path <- file.path(app_dir, 'cbt_memos.rds')
+read_memos <- function() {
+  if (!file.exists(memo_path)) return(list())
+  x <- tryCatch(readRDS(memo_path), error = function(e) {
+    warning(paste('메모 파일을 읽지 못했습니다:', conditionMessage(e)))
+    list()
+  })
+  if (!is.list(x)) return(list())
+  x
+}
+memo_key <- function(year, number) paste0(year, '_', sprintf('%03d', as.integer(number)))
+write_memo <- function(year, number, value) {
+  if (!grepl('^20[0-9]{2}$', as.character(year)) ||
+      is.na(number) || number < 1L || number > 120L) return(FALSE)
+  key <- memo_key(year, number)
+  notes <- read_memos()
+  notes[[key]] <- as.character(value)
+  tmp <- tempfile(pattern = 'cbt_memo_', tmpdir = app_dir, fileext = '.rds')
+  on.exit(if (file.exists(tmp)) unlink(tmp), add=TRUE)
+  saveRDS(notes, tmp)
+  # Windows에서는 대상 파일이 존재할 때 rename이 실패할 수 있습니다.
+  # 먼저 복사로 갱신하며 실패 시 에러를 호출자에게 전달합니다.
+  if (!file.copy(tmp, memo_path, overwrite=TRUE)) stop('메모 파일 저장 실패: 폴더 쓰기 권한을 확인하세요.')
+  TRUE
+}
 
 is_correct_answer <- function(selected, keys) {
   vapply(seq_along(selected), function(i) {
@@ -165,7 +193,8 @@ create_question_images <- function(pdf_file, target_dir, progress = NULL) {
     x0 <- lefts[column]; x1 <- rights[column]
     y0 <- max(top_margin, pos$y[i] - 9)
     same_col <- which(pos$page == p & pos$column == column & pos$y > pos$y[i] + 3)
-    y1 <- if (length(same_col) > 0L) min(pos$y[same_col]) - 7 else page_h - bottom_margin
+    # y1 <- if (length(same_col) > 0L) min(pos$y[same_col]) - 7 else page_h - bottom_margin
+    y1 <- if (length(same_col) > 0L) min(pos$y[same_col]) + 3 else page_h - bottom_margin
     if (y1 <= y0 + 20) y1 <- y0 + 75
     y1 <- min(page_h - 10, y1)
 
@@ -173,12 +202,54 @@ create_question_images <- function(pdf_file, target_dir, progress = NULL) {
     pw <- max(1L, round((x1-x0) * sx)); ph <- max(1L, round((y1-y0) * sy))
     geom <- sprintf('%dx%d+%d+%d', pw, ph, px, py)
     filename <- sprintf('q%03d.png', pos$number[i])
-    question_img <- magick::image_crop(rendered, geometry = geom, repage = TRUE)
+    # question_img <- magick::image_crop(rendered, geometry = geom, repage = TRUE)
+    question_img <- trim_question_bottom(question_img, padding_px = 35L)
     question_img <- trim_question_bottom(question_img, padding_px = 16L)
     magick::image_write(question_img, file.path(target_dir, filename), format='png')
     if (!is.null(progress)) progress(i / total, sprintf('%d / %d 문항', i, total))
   }
   data.frame(number=pos$number, image=sprintf('q%03d.png', pos$number), stringsAsFactors=FALSE)
+}
+
+# 캐시 확인: 120개가 모두 존재하고, PDF 지문이 같으면 재사용합니다.
+question_manifest <- function(target_dir) {
+  file.path(target_dir, sprintf('q%03d.png', 1:120))
+}
+
+question_index <- function() {
+  data.frame(number = 1:120,
+             image = sprintf('q%03d.png', 1:120), stringsAsFactors = FALSE)
+}
+
+get_cached_questions <- function(pdf_file, target_dir, force = FALSE) {
+  if (force || !all(file.exists(question_manifest(target_dir)))) return(NULL)
+  meta_path <- file.path(target_dir, 'cache_meta.rds')
+  signature <- unname(tools::md5sum(pdf_file))
+  if (file.exists(meta_path)) {
+    meta <- tryCatch(readRDS(meta_path), error = function(e) NULL)
+    if (is.null(meta) || !identical(meta$pdf_md5, signature)) return(NULL)
+  } else {
+    # 예전 버전에서 잘라 놓은 이미지도 그대로 재사용합니다.
+    # 기존 이미지에 PDF 메타데이터가 없으므로, 현재 PDF와 같다는 보장은 없습니다.
+    message('기존 120개 이미지 재사용: PDF 원본 지문이 기록되지 않은 이전 캐시입니다.')
+    return(list(questions = question_index(), legacy = TRUE))
+  }
+  list(questions = question_index(), legacy = FALSE)
+}
+
+build_or_reuse_questions <- function(pdf_file, target_dir, force = FALSE, progress = NULL) {
+  cache <- get_cached_questions(pdf_file, target_dir, force = force)
+  if (!is.null(cache)) {
+    return(list(questions = cache$questions,
+                message = if (cache$legacy) '기존 이미지 재사용(원본 PDF 일치 여부 미검증)' else '기존 이미지 재사용'))
+  }
+  # 재생성 중 에러가 나도 기존 120장에 잘못된 캐시 메타데이터가 남지 않게 합니다.
+  meta_path <- file.path(target_dir, 'cache_meta.rds')
+  if (file.exists(meta_path)) unlink(meta_path)
+  pos <- create_question_images(pdf_file, target_dir, progress = progress)
+  if (!all(file.exists(question_manifest(target_dir)))) stop('일부 문제 이미지가 생성되지 않았습니다.')
+  saveRDS(list(pdf_md5 = unname(tools::md5sum(pdf_file))), meta_path)
+  list(questions = pos, message = if (force) '문제 이미지 강제 재생성 완료' else '문제 이미지 최초 생성 완료')
 }
 
 # fixed answer key
@@ -221,10 +292,17 @@ get_pdf_year <- function(pdf_name) {
 ui <- fluidPage(
   tags$head(
     tags$style(HTML('
-      .qwrap {text-align:center;margin:12px 0 18px;overflow:auto;max-height:66vh;}
+      # .qwrap {text-align:center;margin:12px 0 18px;overflow:auto;max-height:66vh;}
+      .qwrap {text-align:center;margin:12px 0 18px;overflow:auto;max-height:80vh;}
       .qimg {max-width:100%;height:auto;display:block;margin:auto;cursor:zoom-in;}
       .qimg.enlarged {max-width:none;max-height:none;}
       .actionbar {display:flex;flex-wrap:wrap;gap:8px;margin:12px 0;}
+      .study-layout {display:flex;gap:18px;align-items:flex-start;}
+      .study-question {flex:1 1 63%;min-width:0;}
+      .study-memo {flex:0 0 34%;min-width:230px;position:sticky;top:12px;border:1px solid #d7dde4;border-radius:8px;padding:14px;background:#fafbfc;}
+      .memo-editor {width:100%;min-height:310px;resize:vertical;font-size:14px;line-height:1.6;border:1px solid #bcc6d0;border-radius:5px;padding:10px;}
+      .memo-status {font-size:12px;color:#67717c;margin-top:8px;}
+      @media(max-width:900px){.study-layout{flex-direction:column;}.study-question,.study-memo{width:100%;flex:auto;}.study-memo{position:static;}}
     ')),
     tags$script(HTML("document.addEventListener('keydown',function(e){
       if(e.repeat||e.ctrlKey||e.altKey||e.metaKey||e.isComposing)return;
@@ -240,12 +318,32 @@ ui <- fluidPage(
         if(id){var b=document.getElementById(id);if(b){e.preventDefault();b.click();}}
       }
     });
+    // 메모는 현재 입력 중인 문제의 key와 함께 전송하여 문제 이동 시 섞이지 않게 합니다.
+    var memoTimer=null;
+    function sendMemo(el){
+      if(!el || !el.classList.contains('memo-editor') || !window.Shiny)return;
+      if(memoTimer){clearTimeout(memoTimer);memoTimer=null;}
+      Shiny.setInputValue('memo_payload',{
+        year:el.dataset.year, number:Number(el.dataset.number),
+        text:el.value, nonce:Date.now()
+      },{priority:'event'});
+    }
+    document.addEventListener('input',function(e){
+      if(!e.target.classList.contains('memo-editor'))return;
+      var el=e.target;
+      if(memoTimer)clearTimeout(memoTimer);
+      memoTimer=setTimeout(function(){sendMemo(el);},600);
+    });
+    document.addEventListener('focusout',function(e){
+      if(e.target.classList.contains('memo-editor'))sendMemo(e.target);
+    });
     document.addEventListener('click',function(e){
       if(e.target.classList.contains('qimg'))e.target.classList.toggle('enlarged');
+      if(e.target.id==='memo_save_btn')sendMemo(document.querySelector('.memo-editor'));
     });"))
   ),
   titlePanel('정보시스템감리사 기출 CBT (2015~2025)'),
-  p('정답 표시가 제거된 문제지 PDF를 선택하면 파일명에서 연도를 인식하고, 고정 answer_key.csv로 채점합니다.'),
+  p('정답 제거 PDF 선택 후 불러오면, 저장된 120개 이미지가 있으면 재사용하고 없으면 새로 생성합니다.'),
   sidebarLayout(
     sidebarPanel(
       selectInput('pdf_file', '① 정답 제거 PDF 선택',
@@ -253,6 +351,7 @@ ui <- fluidPage(
                   selected=''),
       textOutput('chosen_year'),
       actionButton('build', 'CBT 문제 불러오기', class='btn-primary'),
+      actionButton('rebuild', '문제 이미지 다시 생성'),
       hr(), textOutput('build_status'), hr(),
       uiOutput('jump_ui'),
       actionButton('random_btn', '무작위 문제'),
@@ -281,7 +380,7 @@ server <- function(input, output, session) {
     paste0('자동 인식 연도: ', year, '년 (A형 정답)')
   })
 
-  observeEvent(input$build, {
+  load_exam <- function(force = FALSE) {
     req(input$pdf_file)
     selected_name <- basename(input$pdf_file)
     if (!selected_name %in% get_clean_pdfs()) {
@@ -305,12 +404,13 @@ server <- function(input, output, session) {
       return()
     }
     target_dir <- file.path(out_dir, paste0(year, '_', typ))
-    status('PDF에서 문제 이미지를 만드는 중입니다...')
+    status(if (force) 'PDF에서 문제 이미지를 다시 생성하는 중입니다...' else '기존 문제 이미지 캐시를 확인하는 중입니다...')
     tryCatch({
-      pos <- withProgress(message='문항 이미지 생성', value=0, {
-        create_question_images(selected_pdf, target_dir,
+      loaded <- withProgress(message=if (force) '문항 이미지 재생성' else '문항 이미지 불러오기', value=0, {
+        build_or_reuse_questions(selected_pdf, target_dir, force = force,
           progress=function(value, detail) setProgress(value=value, detail=detail))
       })
+      pos <- loaded$questions
       hit <- match(pos$number, db$number)
       pos$answer <- db$answer[hit]
       pos$status <- db$status[hit]
@@ -325,15 +425,18 @@ server <- function(input, output, session) {
       finished(FALSE)
       image_version(image_version() + 1L)
       missing_q <- setdiff(db$number, pos$number)
-      status(sprintf('%s년 | %s | 이미지 %d개 / 정답 확인 %d개 / 미확정 %d개%s',
-        year, basename(selected_pdf), nrow(pos), sum(!is.na(pos$answer_keys)), sum(is.na(pos$answer_keys)),
+      status(sprintf('%s년 | %s | %s | 이미지 %d개 / 정답 확인 %d개 / 미확정 %d개%s',
+        year, basename(selected_pdf), loaded$message, nrow(pos), sum(!is.na(pos$answer_keys)), sum(is.na(pos$answer_keys)),
         if (length(missing_q)) paste0(' | 미추출 문제 ', paste(missing_q, collapse=',')) else ''))
       showNotification('문제 불러오기 완료', type='message')
     }, error=function(e) {
       status(paste('오류:', conditionMessage(e)))
       showNotification(conditionMessage(e), type='error', duration=NULL)
     })
-  })
+  }
+
+  observeEvent(input$build, load_exam(FALSE))
+  observeEvent(input$rebuild, load_exam(TRUE))
 
   output$jump_ui <- renderUI({
     q <- questions(); if (is.null(q)) return(NULL)
@@ -370,6 +473,17 @@ server <- function(input, output, session) {
     finished(FALSE); current(1L)
   })
 
+  # 브라우저에서 전송한 (연도, 문제번호, 메모) 조합을 영구 저장합니다.
+  # 문제 이동 후 늦게 도착한 전송도 payload에 기록된 원래 키로 저장합니다.
+  observeEvent(input$memo_payload, {
+    payload <- input$memo_payload
+    if (is.null(payload$year) || is.null(payload$number) || is.null(payload$text)) return()
+    tryCatch({
+      write_memo(as.character(payload$year), as.integer(payload$number), payload$text)
+      # 메모 표시를 갱신하는 리액티브 의존성을 만들지 않아 입력 도중 화면이 사라지지 않습니다.
+    }, error=function(e) showNotification(paste('메모 저장 오류:', conditionMessage(e)), type='error', duration=NULL))
+  })
+
   output$main_ui <- renderUI({
     q <- questions()
     if (is.null(q)) {
@@ -378,16 +492,34 @@ server <- function(input, output, session) {
     }
     if (finished()) return(tagList(h3('최종 결과'), uiOutput('stats'), actionButton('resume_btn', '문제로 돌아가기')))
     n <- current()
+    memo_content <- read_memos()[[memo_key(q$year[n], q$number[n])]]
+    if (is.null(memo_content)) memo_content <- ''
     tagList(
       h3(sprintf('%s년 · %d번 (%d / %d)', q$year[n], q$number[n], n, nrow(q))),
-      div(class='qwrap', tags$img(class='qimg', alt=paste0(q$number[n], '번 문제'), src=paste0(q$image_url[n], '?v=', image_version()))),
-      p(class='text-muted', '이미지 클릭: 확대/축소'),
-      radioButtons('selected', '답안 선택', choices=stats::setNames(as.character(1:4), circle_labels),
-                   selected=if (is.na(picked()[n])) character(0) else as.character(picked()[n]), inline=TRUE),
-      div(class='actionbar', actionButton('prev_btn', '이전 (P)'),
-          actionButton('check_btn', '정답 확인 (C)', class='btn-primary'),
-          actionButton('next_btn', '다음 (N)'), actionButton('finish_btn', '결과 보기', class='btn-success')),
-      uiOutput('feedback')
+      div(class='study-layout',
+        div(class='study-question',
+          div(class='qwrap', tags$img(class='qimg', alt=paste0(q$number[n], '번 문제'),
+            src=paste0(q$image_url[n], '?v=', image_version()))),
+          p(class='text-muted', '이미지 클릭: 확대/축소'),
+          radioButtons('selected', '답안 선택', choices=stats::setNames(as.character(1:4), circle_labels),
+            selected=if (is.na(picked()[n])) character(0) else as.character(picked()[n]), inline=TRUE),
+          div(class='actionbar', actionButton('prev_btn', '이전 (P)'),
+            actionButton('check_btn', '정답 확인 (C)', class='btn-primary'),
+            actionButton('next_btn', '다음 (N)'), actionButton('finish_btn', '결과 보기', class='btn-success')),
+          uiOutput('feedback')
+        ),
+        div(class='study-memo',
+          h4('문제별 학습 메모'),
+          p(class='text-muted', sprintf('%s년 %d번 전용', q$year[n], q$number[n])),
+          tags$textarea(memo_content, class='memo-editor', id='memo_text',
+            `data-year`=as.character(q$year[n]),
+            `data-number`=as.character(q$number[n]),
+            placeholder='개념 정리, 오답 원인, AI 해설을 기록해 보세요.'),
+          tags$button(id='memo_save_btn', type='button', class='btn btn-default', '지금 저장'),
+          div(class='memo-status', '입력 후 약 0.6초에 자동 저장 · 문제 이동 시에도 저장'),
+          div(class='memo-status', '저장 파일: cbt_memos.rds')
+        )
+      )
     )
   })
 
