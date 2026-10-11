@@ -7,5 +7,6 @@
 
 1. 본 파일들을 모두 한 폴더에 넣어 놓고 Rstudio에서 app_light.R을 열고 'Run App' 버튼을 누른다.
 2. 좌상단에서 연습할 연도의 감리사기출문제를 콤보박스에서 선택하고 'CBT 문제 불러오기'를 클릭
-3. 문제를 풀면서 다음버튼을 누르면 됨
-<img width="896" height="936" alt="image" src="https://github.com/user-attachments/assets/b4658365-f79d-46f4-8f6a-4fcb3b64fb9e" />
+3. 문제를 풀면서 다음버튼을 누르면 되고, 문제 오른쪽에 문제별로 메모 및 저장도 가능함
+<img width="1289" height="936" alt="image" src="https://github.com/user-attachments/assets/a26b7337-6678-49ca-ab51-89074a9e614e" />
+
