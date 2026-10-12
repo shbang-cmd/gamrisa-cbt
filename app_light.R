@@ -3,7 +3,7 @@
 # 권장: 2015년_CBT_정답표시제거.pdf 같은 '정답표시제거' PDF를 같은 폴더에 두면
 #       앱이 원본보다 우선 사용하여, 문제 화면에서 굵은 정답 표시를 숨깁니다.
 
-required <- c('shiny', 'pdftools', 'magick')
+required <- c('shiny', 'pdftools', 'magick', 'markdown')
 missing_pkgs <- required[!vapply(required, requireNamespace, logical(1), quietly = TRUE)]
 if (length(missing_pkgs) > 0L) {
   stop(paste0('패키지 설치가 필요합니다: install.packages(c(',
@@ -55,19 +55,49 @@ subject_names <- c(all='전체 문제', audit='감리 및 사업관리',
                    software='소프트웨어공학', database='데이터베이스',
                    system='시스템구조', security='보안')
 
+# 세부 영역 분류표: PDF 내용을 기반으로 만든 잠정 분류. 오분류 가능성이 있어 CSV 편집 가능.
+domain_path <- file.path(app_dir, 'question_domains.csv')
+domain_groups <- list(
+  audit = c('법령 및 제도','감리 절차 및 기준','사업관리·PMBOK','계약 및 발주','품질·위험관리','미분류'),
+  software = c('요구사항·분석','설계·아키텍처','개발방법론·프로세스','테스트·품질','유지보수·형상·추정','미분류'),
+  database = c('데이터 모델링·정규화','SQL·질의 최적화','트랜잭션·동시성·복구','인덱스·저장구조·성능','분산·NoSQL·빅데이터','미분류'),
+  system = c('컴퓨터구조·하드웨어','운영체제·프로세스','네트워크·통신','분산·클라우드·가상화','시스템성능·가용성','미분류'),
+  security = c('암호학·키 관리','인증·접근통제','네트워크·시스템 보안','취약점·공격·대응','보안관리·법령·거버넌스','미분류')
+)
+all_domain_names <- unique(unlist(domain_groups, use.names=FALSE))
+read_domains <- function() {
+  if (!file.exists(domain_path)) return(data.frame(year=character(0),number=integer(0),domain=character(0)))
+  x <- tryCatch(read.csv(domain_path, fileEncoding='UTF-8-BOM', stringsAsFactors=FALSE), error=function(e) NULL)
+  if (is.null(x) || !all(c('year','number','domain') %in% names(x))) return(data.frame(year=character(0),number=integer(0),domain=character(0)))
+  x$year <- as.character(x$year); x$number <- suppressWarnings(as.integer(x$number))
+  x[!duplicated(paste(x$year,x$number)),,drop=FALSE]
+}
+
 # 현재 PDF / 전체 연도 학습 위치를 각각 저장하는 책갈피
+# 영역별 문항 수: CSV의 실제 분류 건수를 메뉴 레이블에 반영
+# 내부 선택값은 영역명 그대로 두므로 기존 검색, 복습, 북마크 동작은 유지됨
+domain_choices <- function(subject_id) {
+  if (!(subject_id %in% names(domain_groups))) return(character(0))
+  domains <- domain_groups[[subject_id]]
+  x <- read_domains()
+  if (!('subject' %in% names(x))) return(stats::setNames(domains, paste0(domains, ' (0)')))
+  x <- x[x$subject == subject_names[[subject_id]], , drop=FALSE]
+  counts <- table(factor(x$domain, levels=domains))
+  stats::setNames(domains, sprintf('%s (%d)', domains, as.integer(counts)))
+}
+
 bookmark_path <- file.path(app_dir, 'cbt_bookmarks.rds')
 read_bookmarks <- function() {
   if (!file.exists(bookmark_path)) return(list())
   x <- tryCatch(readRDS(bookmark_path), error=function(e) list())
   if (!is.list(x)) list() else x
 }
-write_bookmark <- function(scope, subject, year, number) {
+write_bookmark <- function(scope, subject, year, number, domain='') {
   stopifnot(scope %in% c('local', 'global'), subject %in% names(subject_ranges))
   data <- read_bookmarks()
   data[[scope]] <- list(subject=as.character(subject),
                         year=as.character(year), number=as.integer(number),
-                        saved_at=Sys.time())
+                        domain=as.character(domain), saved_at=Sys.time())
   temp <- tempfile('bookmarks_', tmpdir=app_dir, fileext='.rds')
   on.exit(if (file.exists(temp)) unlink(temp), add=TRUE)
   saveRDS(data, temp)
@@ -449,6 +479,14 @@ ui <- fluidPage(
       .study-memo {flex:0 0 34%;min-width:230px;position:sticky;top:12px;border:1px solid #d7dde4;border-radius:8px;padding:14px;background:#fafbfc;}
       .memo-editor {width:100%;min-height:520px;resize:vertical;font-size:14px;line-height:1.6;border:1px solid #bcc6d0;border-radius:5px;padding:10px;}
       .memo-status {font-size:12px;color:#67717c;margin-top:8px;}
+      .memo-tabs {display:flex;gap:6px;margin:9px 0;}
+      .memo-tabs .btn.active {background:#176aa3;color:white;border-color:#176aa3;}
+      .memo-preview {min-height:520px;max-height:72vh;overflow:auto;border:1px solid #bcc6d0;border-radius:5px;padding:12px;background:white;line-height:1.7;overflow-wrap:anywhere;}
+      .memo-preview table {border-collapse:collapse;max-width:100%;}
+      .memo-preview th,.memo-preview td {border:1px solid #ddd;padding:5px;}
+      .memo-preview img {max-width:100%;}
+      .memo-preview .MathJax_Display {overflow-x:auto;overflow-y:hidden;}
+
       .difficulty-row {display:flex;gap:7px;flex-wrap:wrap;margin:9px 0;}
       .difficulty-row .btn {flex:1 1 26%;padding:8px 5px;}
       .difficulty-help {font-size:12px;color:#67717c;margin:7px 0 12px;}
@@ -489,9 +527,44 @@ ui <- fluidPage(
       if(e.target.classList.contains('memo-editor'))sendMemo(e.target);
     });
     document.addEventListener('click',function(e){
+      var toggle=e.target.closest && e.target.closest('[data-memo-tab]');
+      if(toggle){
+        e.preventDefault();
+        var tab=toggle.dataset.memoTab;
+        var editor=document.querySelector('.memo-editor');
+        var editing=document.getElementById('memo_edit_pane');
+        var preview=document.getElementById('memo_preview_pane');
+        if(editor && editing && preview){
+          editing.style.display=tab==='preview'?'none':'';
+          preview.style.display=tab==='preview'?'':'none';
+          document.querySelectorAll('[data-memo-tab]').forEach(function(el){el.classList.toggle('active',el.dataset.memoTab===tab);});
+          if(tab==='preview' && window.Shiny){
+            sendMemo(editor);
+            Shiny.setInputValue('memo_preview_request',{
+              year:editor.dataset.year,number:Number(editor.dataset.number),
+              text:editor.value,nonce:Date.now()
+            },{priority:'event'});
+          }
+        }
+        return;
+      }
       if(e.target.classList.contains('qimg'))e.target.classList.toggle('enlarged');
       if(e.target.id==='memo_save_btn')sendMemo(document.querySelector('.memo-editor'));
-    });"))
+    });
+    // Shiny가 미리보기 HTML을 새로 그릴 때 MathJax 수식을 다시 조판합니다.
+    $(document).on('shiny:value',function(e){
+      if(e.target.id!=='memo_preview_ui')return;
+      setTimeout(function(){
+        var target=document.getElementById('memo_preview_ui');
+        if(!target)return;
+        if(window.MathJax && MathJax.Hub && MathJax.Hub.Queue){
+          MathJax.Hub.Queue(['Typeset',MathJax.Hub,target]);
+        }else if(window.MathJax && MathJax.typesetPromise){
+          MathJax.typesetPromise([target]).catch(function(){});
+        }
+      },60);
+    });")),
+    withMathJax()
   ),
   titlePanel('정보시스템감리사 기출 CBT (2015~2025)'),
   p('정답 제거 PDF 선택 후 불러오면, 저장된 120개 이미지가 있으면 재사용하고 없으면 새로 생성합니다.'),
@@ -535,6 +608,16 @@ ui <- fluidPage(
           actionButton('global_bookmark_resume', '이어 풀기')
         )
       ),
+      hr(),
+      strong('과목별 세부 영역(Domain) 문제풀이'),
+      selectInput('domain_subject', '과목', choices=stats::setNames(names(domain_groups), subject_names[names(domain_groups)]), selected='audit'),
+      selectInput('domain_select', '세부 영역', choices=domain_choices('audit'), selected='법령 및 제도'),
+      div(class='subject-columns',
+        div(class='subject-column', actionButton('domain_local','현재 PDF 영역 풀이',class='btn-info')),
+        div(class='subject-column', actionButton('domain_global','전체 연도 영역 풀이',class='btn-primary'))
+      ),
+      actionButton('domain_clear', '세부 영역 해제'),
+      textOutput('domain_status'),
       textOutput('subject_status'),
       hr(),
       uiOutput('jump_ui'),
@@ -553,6 +636,7 @@ server <- function(input, output, session) {
   current <- reactiveVal(1L)
   active_subject <- reactiveVal('all')
   active_scope <- reactiveVal('local')
+  active_domain <- reactiveVal('')
   review_only <- reactiveVal(FALSE)
   difficulty_version <- reactiveVal(0L)
   bookmark_version <- reactiveVal(0L)
@@ -573,7 +657,7 @@ server <- function(input, output, session) {
       return(invisible(FALSE))
     }
     tryCatch({
-      write_bookmark(scope, active_subject(), q$year[current()], q$number[current()])
+      write_bookmark(scope, active_subject(), q$year[current()], q$number[current()], active_domain())
       bookmark_version(bookmark_version() + 1L)
       if (notify) showNotification('학습 위치를 저장했습니다.', type='message')
       TRUE
@@ -592,14 +676,14 @@ server <- function(input, output, session) {
     i <- current()
     if (i < 1L || i > nrow(q)) return(NULL)
     list(scope = active_scope(), subject = active_subject(),
-         year = as.character(q$year[i]), number = as.integer(q$number[i]))
+         year = as.character(q$year[i]), number = as.integer(q$number[i]), domain=active_domain())
   })
   delayed_position <- shiny::debounce(position_to_save, millis = 600)
   observeEvent(delayed_position(), {
     pos <- delayed_position()
     if (is.null(pos)) return()
     tryCatch({
-      write_bookmark(pos$scope, pos$subject, pos$year, pos$number)
+      write_bookmark(pos$scope, pos$subject, pos$year, pos$number, pos$domain)
       bookmark_version(bookmark_version() + 1L)
     }, error = function(e) {
       showNotification(paste('자동 책갈피 저장 오류:', conditionMessage(e)),
@@ -626,6 +710,7 @@ server <- function(input, output, session) {
     }
     active_scope('local')
     active_subject(b$subject)
+    active_domain(if (!is.null(b$domain) && b$domain %in% all_domain_names) b$domain else '')
     current(i)
     finished(FALSE)
   })
@@ -641,6 +726,7 @@ server <- function(input, output, session) {
     checked(rep(FALSE, nrow(q)))
     active_scope('global')
     active_subject(b$subject)
+    active_domain(if (!is.null(b$domain) && b$domain %in% all_domain_names) b$domain else '')
     current(i)
     finished(FALSE)
     image_version(image_version() + 1L)
@@ -649,6 +735,12 @@ server <- function(input, output, session) {
     q <- questions()
     if (is.null(q)) return(integer(0))
     ids <- which(q$number %in% subject_ranges[[active_subject()]])
+    if (nzchar(active_domain()) && length(ids)) {
+      domain_data <- read_domains()
+      key <- paste(q$year[ids],q$number[ids])
+      domain_value <- domain_data$domain[match(key,paste(domain_data$year,domain_data$number))]
+      ids <- ids[!is.na(domain_value) & domain_value == active_domain()]
+    }
     if (review_only() && length(ids)) {
       difficulty_version()
       saved <- read_difficulties()
@@ -662,6 +754,7 @@ server <- function(input, output, session) {
   output$subject_status <- renderText({
     scope_name <- if (active_scope() == 'global') '전체 연도 이미지' else '현재 PDF'
     paste0('현재 모드: ', scope_name, ' / ', subject_names[[active_subject()]],
+           if (nzchar(active_domain())) paste0(' / ', active_domain()) else '',
            if (review_only()) ' / 보통·어려움 복습' else '',
            ' (', length(subject_indices()), '문항)')
   })
@@ -682,6 +775,7 @@ server <- function(input, output, session) {
         active_scope('local')
         review_only(FALSE)
         active_subject(id)
+        active_domain('')
         eligible <- which(q$number %in% subject_ranges[[id]])
         if (length(eligible)) current(eligible[1])
         finished(FALSE)
@@ -702,6 +796,7 @@ server <- function(input, output, session) {
         active_scope('global')
         review_only(FALSE)
         active_subject(id)
+        active_domain('')
         picked(rep(NA_integer_, nrow(q)))
         checked(rep(FALSE, nrow(q)))
         current(eligible[1])
@@ -712,6 +807,62 @@ server <- function(input, output, session) {
       })
     })
   }
+
+  observeEvent(input$domain_subject, {
+    id <- input$domain_subject
+    if (is.null(id) || !(id %in% names(domain_groups))) return()
+    ch <- domain_choices(id)
+    updateSelectInput(session, 'domain_select', choices=ch, selected=unname(ch[1]))
+  }, ignoreInit=FALSE)
+
+  observeEvent(list(active_domain(), active_subject()), {
+    if (!nzchar(active_domain())) return()
+    id <- active_subject()
+    if (!(id %in% names(domain_groups))) return()
+    updateSelectInput(session, 'domain_subject', selected=id)
+    updateSelectInput(session, 'domain_select', selected=active_domain())
+  }, ignoreInit=TRUE)
+
+  output$domain_status <- renderText({
+    if (!nzchar(active_domain())) return('세부 영역 필터: 사용 안 함')
+    paste0('선택 영역: ', subject_names[[active_subject()]], ' / ', active_domain(), ' / ', length(subject_indices()), '문항 (현재 이용 가능한 이미지 기준)')
+  })
+  launch_domain <- function(scope) {
+    id <- input$domain_subject
+    d <- input$domain_select
+    if (is.null(id) || !(id %in% names(domain_groups)) || is.null(d) || !(d %in% domain_groups[[id]])) return()
+    q <- if (scope == 'global') load_all_cached_images() else local_questions()
+    if (is.null(q)) {
+      showNotification(if (scope == 'global') '전체 연도 이미지가 없습니다.' else '먼저 PDF를 불러오세요.',type='warning')
+      return()
+    }
+    domain_data <- read_domains()
+    ids <- which(q$number %in% subject_ranges[[id]])
+    domains <- domain_data$domain[match(paste(q$year[ids], q$number[ids]),
+                                       paste(domain_data$year, domain_data$number))]
+    ids <- ids[!is.na(domains) & domains == d]
+    if (!length(ids)) {
+      showNotification('이 영역에 분류된 이용 가능한 문제 이미지가 없습니다.',type='warning',duration=7)
+      return()
+    }
+    if (scope == 'global' || active_scope() != 'local') {
+      questions(q); picked(rep(NA_integer_, nrow(q))); checked(rep(FALSE,nrow(q)))
+    }
+    active_scope(scope)
+    active_subject(id)
+    review_only(FALSE)
+    active_domain(d)
+    current(ids[1])
+    finished(FALSE)
+    image_version(image_version()+1L)
+  }
+  observeEvent(input$domain_local, launch_domain('local'))
+  observeEvent(input$domain_global, launch_domain('global'))
+  observeEvent(input$domain_clear, {
+    active_domain('')
+    eligible <- subject_indices()
+    if (length(eligible) && !(current() %in% eligible)) current(eligible[1])
+  })
 
   picked <- reactiveVal(integer(0))
   checked <- reactiveVal(logical(0))
@@ -792,6 +943,7 @@ server <- function(input, output, session) {
                         resume_bookmark$subject %in% names(subject_ranges))
                       resume_bookmark$subject else active_subject()
       active_subject(subject_id)
+      active_domain(if (!is.null(resume_bookmark$domain) && resume_bookmark$domain %in% all_domain_names) resume_bookmark$domain else '')
       eligible <- which(pos$number %in% subject_ranges[[subject_id]])
       resume_i <- if (!is.null(resume_bookmark)) {
         which(pos$year == as.character(resume_bookmark$year) &
@@ -842,6 +994,7 @@ server <- function(input, output, session) {
       checked(rep(FALSE, nrow(q)))
       active_scope('global')
       active_subject(b$subject)
+    active_domain(if (!is.null(b$domain) && b$domain %in% all_domain_names) b$domain else '')
       current(i)
       finished(FALSE)
       image_version(image_version() + 1L)
@@ -992,6 +1145,71 @@ server <- function(input, output, session) {
     finished(FALSE)
   })
 
+  # Gemini 복사 시 중복된 Markdown/LaTeX 이스케이프를 미리보기에서만 정리합니다.
+  # 원본 메모(cbt_memos.rds)는 전혀 변경하지 않습니다.
+  render_memo_markdown <- function(content) {
+    normalized <- content
+    # 예: \\(x\_{1}\\) -> \(x_{1}\), \*\*강조\*\* -> **강조**
+    for (delimiter in c('(', ')', '[', ']')) {
+      normalized <- gsub(paste0('\\\\', delimiter), paste0('\\', delimiter),
+                         normalized, fixed=TRUE)
+    }
+    normalized <- gsub('\\*', '*', normalized, fixed=TRUE)
+    normalized <- gsub('\\_', '_', normalized, fixed=TRUE)
+
+    # Markdown 처리기가 수식의 역슬래시를 소모하지 않도록 임시 토큰으로 보호합니다.
+    # R 4.0+ raw string: 역슬래시 중복 이스케이프 없이 PCRE 정규식을 작성합니다.
+    # 괄호 균형 및 수식 구분자를 명시하여 invalid regular expression 오류를 방지합니다.
+    math_pattern <- r"{(?s)\\\[(.*?)\\\]|\\\((.*?)\\\)|\$\$(.*?)\$\$|(?<!\$)\$(?!\$)[^\r\n$]+?\$(?!\$)}"
+    m <- gregexpr(math_pattern, normalized, perl=TRUE)[[1]]
+    expressions <- if (m[1] == -1L) character() else regmatches(normalized, list(m))[[1]]
+    placeholders <- character(length(expressions))
+    if (length(expressions)) {
+      for (i in seq_along(expressions)) {
+        token <- sprintf('CBTMATHPLACEHOLDER%05dEND', i)
+        placeholders[i] <- token
+        normalized <- sub(math_pattern, token, normalized, perl=TRUE)
+      }
+    }
+    safe <- as.character(htmltools::htmlEscape(normalized))
+    rendered <- markdown::markdownToHTML(text=safe, fragment.only=TRUE)
+    # 일부 Gemini 복사 텍스트에서는 **강조** 표시가 Markdown 처리 후에도
+    # 문자 그대로 남습니다. 안전하게 HTML 이스케이프한 문자열에 한해 보정합니다.
+    # 이미 Markdown이 <strong> 태그로 변환한 내용은 건드리지 않습니다.
+    rendered <- gsub(
+      r"{(?:\\)?\*(?:\\)?\*([^*\r\n]+?)(?:\\)?\*(?:\\)?\*}",
+      '<strong>\\1</strong>', rendered, perl=TRUE
+    )
+    for (i in seq_along(expressions)) {
+      expr <- expressions[i]
+      if (startsWith(expr, '$') && !startsWith(expr, '$$')) {
+        expr <- paste0('\\(', substring(expr, 2L, nchar(expr)-1L), '\\)')
+      }
+      # HTML은 이스케이프하지만 LaTeX 역슬래시는 유지합니다.
+      safe_math <- as.character(htmltools::htmlEscape(expr))
+      rendered <- gsub(placeholders[i], safe_math, rendered, fixed=TRUE)
+    }
+    rendered
+  }
+
+  # 미리보기는 버튼을 눌렀을 때만 갱신: 기존 메모 RDS 구조는 바꾸지 않습니다.
+  # HTML 태그는 먼저 이스케이프해 AI 답변에 들어간 HTML 실행을 막습니다.
+  output$memo_preview_ui <- renderUI({
+    req(input$memo_preview_request)
+    request <- input$memo_preview_request
+    q <- questions()
+    if (is.null(q) || finished()) return(NULL)
+    n <- current()
+    if (!identical(as.character(request$year), as.character(q$year[n])) ||
+        !identical(as.integer(request$number), as.integer(q$number[n]))) return(NULL)
+    content <- as.character(request$text)
+    if (!nzchar(trimws(content))) {
+      return(div(class='memo-preview', '저장된 메모가 없습니다.'))
+    }
+    rendered <- render_memo_markdown(content)
+    div(class='memo-preview', HTML(rendered))
+  })
+
   output$main_ui <- renderUI({
     q <- questions()
     if (is.null(q)) {
@@ -1023,10 +1241,16 @@ server <- function(input, output, session) {
           tags$hr(),
           h4('문제별 학습 메모'),
           p(class='text-muted', sprintf('%s년 %d번 전용', q$year[n], q$number[n])),
-          tags$textarea(memo_content, class='memo-editor', id='memo_text',
-            `data-year`=as.character(q$year[n]),
-            `data-number`=as.character(q$number[n]),
-            placeholder='개념 정리, 오답 원인, AI 해설을 기록해 보세요.'),
+          div(class='memo-tabs',
+            tags$button('편집', type='button', class='btn btn-default active', `data-memo-tab`='edit'),
+            tags$button('수식 미리보기', type='button', class='btn btn-default', `data-memo-tab`='preview')),
+          div(id='memo_edit_pane',
+            tags$textarea(memo_content, class='memo-editor', id='memo_text',
+              `data-year`=as.character(q$year[n]),
+              `data-number`=as.character(q$number[n]),
+              placeholder='Gemini 해설, Markdown, LaTeX 수식을 붙여넣으세요.')),
+          div(id='memo_preview_pane', style='display:none;',
+            uiOutput('memo_preview_ui')),
           tags$button(id='memo_save_btn', type='button', class='btn btn-default', '지금 저장'),
           div(class='memo-status', '입력 후 약 0.6초에 자동 저장 · 문제 이동 시에도 저장'),
           div(class='memo-status', '저장 파일: cbt_memos.rds')
@@ -1086,7 +1310,9 @@ server <- function(input, output, session) {
       }, character(1))
       write.csv(data.frame(year=q$year, type=q$type, number=q$number,
                            selected=a, answer=q$answer_keys, correct=ifelse(valid, ok, NA),
-                           status=q$status, difficulty=levels),
+                           status=q$status, difficulty=levels,
+                           domain=read_domains()$domain[match(paste(q$year,q$number),
+                             paste(read_domains()$year,read_domains()$number))]),
                 file, row.names=FALSE, fileEncoding='UTF-8')
     }
   )
