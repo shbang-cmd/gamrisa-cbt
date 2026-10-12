@@ -521,6 +521,13 @@ ui <- fluidPage(
       .study-layout {display:flex;gap:18px;align-items:flex-start;}
       .study-question {flex:1 1 63%;min-width:0;}
       .study-memo {flex:0 0 34%;min-width:230px;position:sticky;top:12px;border:1px solid #d7dde4;border-radius:8px;padding:14px;background:#fafbfc;}
+      .memo-title-row {display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;}
+      .memo-title-row h4 {margin:0;}
+      .memo-hide-label {font-size:13px;font-weight:normal;white-space:nowrap;cursor:pointer;}
+      .memo-hide-label input {vertical-align:middle;margin:0 5px 0 0;}
+      .study-memo.memo-hidden .memo-body {display:none;}
+      .memo-hidden-notice {display:none;color:#66727d;font-size:13px;padding:22px 10px;text-align:center;border:1px dashed #ccd5df;border-radius:6px;background:#fff;margin-top:10px;}
+      .study-memo.memo-hidden .memo-hidden-notice {display:block;}
       .memo-editor {width:100%;min-height:520px;resize:vertical;font-size:14px;line-height:1.6;border:1px solid #bcc6d0;border-radius:5px;padding:10px;}
       .memo-status {font-size:12px;color:#67717c;margin-top:8px;}
       .memo-preview-pane {cursor:text;}
@@ -579,6 +586,23 @@ ui <- fluidPage(
       if(memoTimer)clearTimeout(memoTimer);
       memoTimer=setTimeout(function(){sendMemo(el);},600);
     });
+    // 체크박스는 문제를 넘겨도 유지합니다. 해설을 가려도 메모 원문은 수정하지 않습니다.
+    var memoHidden = false;
+    function updateMemoVisibility(){
+      var panel=document.querySelector('.study-memo');
+      var toggle=document.getElementById('memo_hide_toggle');
+      if(!panel || !toggle)return;
+      toggle.checked=memoHidden;
+      panel.classList.toggle('memo-hidden',memoHidden);
+    }
+    document.addEventListener('change',function(e){
+      if(e.target.id!=='memo_hide_toggle')return;
+      memoHidden=e.target.checked;
+      // 현재 편집 중인 내용도 숨기기 전에 저장합니다.
+      if(memoHidden)sendMemo(document.querySelector('.memo-editor'));
+      updateMemoVisibility();
+      if(!memoHidden)showMemoMode('preview',true);
+    });
     // 평소에는 수식 미리보기를 표시하고, 미리보기를 클릭하면 편집합니다.
     function showMemoMode(mode, requestPreview){
       var editor=document.querySelector('.memo-editor');
@@ -594,7 +618,7 @@ ui <- fluidPage(
           text:editor.value,nonce:Date.now()
         },{priority:'event'});
       }
-      if(mode==='edit')editor.focus();
+      if(mode==='edit' && !memoHidden)editor.focus();
     }
     document.addEventListener('focusout',function(e){
       if(!e.target.classList.contains('memo-editor'))return;
@@ -605,7 +629,7 @@ ui <- fluidPage(
       },0);
     });
     document.addEventListener('click',function(e){
-      if(e.target.closest && e.target.closest('#memo_preview_pane')){
+      if(!memoHidden && e.target.closest && e.target.closest('#memo_preview_pane')){
         showMemoMode('edit',false);
         return;
       }
@@ -615,7 +639,7 @@ ui <- fluidPage(
     // 문제 전환·앱 시작마다 새로운 문제의 메모를 미리보기로 불러옵니다.
     $(document).on('shiny:value',function(e){
       if(e.target.id!=='main_ui')return;
-      setTimeout(function(){showMemoMode('preview',true);},100);
+      setTimeout(function(){updateMemoVisibility();showMemoMode('preview',!memoHidden);},100);
     });
     // Shiny가 미리보기 HTML을 새로 그릴 때 MathJax 수식을 다시 조판합니다.
     $(document).on('shiny:value',function(e){
@@ -1433,19 +1457,24 @@ server <- function(input, output, session) {
         div(class='study-memo',
           uiOutput('difficulty_ui'),
           tags$hr(),
-          h4('문제별 학습 메모'),
-          p(class='text-muted', sprintf('%s년 %d번 전용', q$year[n], q$number[n])),
-          div(class='memo-preview-hint', '미리보기를 클릭하면 편집 · 편집창 밖을 클릭하면 수식 미리보기'),
-          div(id='memo_edit_pane', style='display:none;',
-            tags$textarea(memo_content, class='memo-editor', id='memo_text',
-              `data-year`=as.character(q$year[n]),
-              `data-number`=as.character(q$number[n]),
-              placeholder='Gemini 해설, Markdown, LaTeX 수식을 붙여넣으세요.')),
-          div(id='memo_preview_pane', class='memo-preview-pane',
-            uiOutput('memo_preview_ui')),
-          tags$button(id='memo_save_btn', type='button', class='btn btn-default', '지금 저장'),
-          div(class='memo-status', '입력 후 약 0.6초에 자동 저장 · 문제 이동 시에도 저장'),
-          div(class='memo-status', '저장 파일: cbt_memos.rds')
+          div(class='memo-title-row',
+            h4('문제별 학습 메모'),
+            tags$label(class='memo-hide-label',
+              tags$input(id='memo_hide_toggle', type='checkbox'), '해설 숨기기')),
+          div(class='memo-hidden-notice', '해설을 숨겼습니다. 문제를 푼 뒤 체크를 해제해 확인하세요.'),
+          div(class='memo-body',
+            p(class='text-muted', sprintf('%s년 %d번 전용', q$year[n], q$number[n])),
+            div(class='memo-preview-hint', '미리보기를 클릭하면 편집 · 편집창 밖을 클릭하면 수식 미리보기'),
+            div(id='memo_edit_pane', style='display:none;',
+              tags$textarea(memo_content, class='memo-editor', id='memo_text',
+                `data-year`=as.character(q$year[n]),
+                `data-number`=as.character(q$number[n]),
+                placeholder='Gemini 해설, Markdown, LaTeX 수식을 붙여넣으세요.')),
+            div(id='memo_preview_pane', class='memo-preview-pane',
+              uiOutput('memo_preview_ui')),
+            tags$button(id='memo_save_btn', type='button', class='btn btn-default', '지금 저장'),
+            div(class='memo-status', '입력 후 약 0.6초에 자동 저장 · 문제 이동 시에도 저장'),
+            div(class='memo-status', '저장 파일: cbt_memos.rds'))
         )
       )
     )
