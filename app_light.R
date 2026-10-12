@@ -86,6 +86,19 @@ domain_choices <- function(subject_id) {
   stats::setNames(domains, sprintf('%s (%d)', domains, as.integer(counts)))
 }
 
+# 5과목 선행개념 학습 경로 (CSV 순서). 난이도는 잠정 추정입니다.
+learning_path_file <- file.path(app_dir, 'all_subject_learning_paths.csv')
+read_learning_path <- function() {
+  if (!file.exists(learning_path_file)) return(NULL)
+  x <- tryCatch(read.csv(learning_path_file, fileEncoding='UTF-8-BOM',
+                         stringsAsFactors=FALSE), error=function(e) NULL)
+  if (is.null(x) || !all(c('year','number','subject','learning_order','chapter','concept','level') %in% names(x))) return(NULL)
+  x$year <- as.character(x$year)
+  x$number <- as.integer(x$number)
+  x <- x[order(x$subject, as.integer(x$learning_order)),,drop=FALSE]
+  x[!duplicated(paste(x$year,x$number)),,drop=FALSE]
+}
+
 bookmark_path <- file.path(app_dir, 'cbt_bookmarks.rds')
 read_bookmarks <- function() {
   if (!file.exists(bookmark_path)) return(list())
@@ -154,6 +167,37 @@ write_difficulty <- function(year, number, level) {
   saveRDS(data, tmp)
   if (!file.copy(tmp, difficulty_path, overwrite=TRUE))
     stop('난이도 저장 실패: 폴더 쓰기 권한을 확인하세요.')
+  TRUE
+}
+
+# 학습 진도: 정답 확인을 한 고유 문제(연도+번호)를 영구 기록합니다.
+# 앱/과목/연도 모드를 바꿔도 중복 집계하지 않습니다.
+progress_path <- file.path(app_dir, 'cbt_study_progress.rds')
+read_study_progress <- function() {
+  if (!file.exists(progress_path)) return(character())
+  x <- tryCatch(readRDS(progress_path), error=function(e) character())
+  if (!is.character(x)) return(character())
+  unique(x[grepl('^20(1[5-9]|2[0-5])_[0-9]{3}$', x)])
+}
+record_study_progress <- function(year, number) {
+  k <- memo_key(year, number)
+  old <- read_study_progress()
+  if (k %in% old) return(FALSE)
+  tmp <- tempfile('cbt_progress_', tmpdir=app_dir, fileext='.rds')
+  on.exit(if (file.exists(tmp)) unlink(tmp), add=TRUE)
+  saveRDS(c(old, k), tmp)
+  if (!file.copy(tmp, progress_path, overwrite=TRUE))
+    stop('학습 진도 저장 실패: 폴더 쓰기 권한을 확인하세요.')
+  TRUE
+}
+
+# 학습 진도만 초기화합니다. 다른 RDS 학습 기록은 건드리지 않습니다.
+reset_study_progress <- function() {
+  tmp <- tempfile('cbt_progress_reset_', tmpdir=app_dir, fileext='.rds')
+  on.exit(if (file.exists(tmp)) unlink(tmp), add=TRUE)
+  saveRDS(character(), tmp)
+  if (!file.copy(tmp, progress_path, overwrite=TRUE))
+    stop('학습 진도 초기화 실패: 폴더 쓰기 권한을 확인하세요.')
   TRUE
 }
 
@@ -487,6 +531,18 @@ ui <- fluidPage(
       .memo-preview img {max-width:100%;}
       .memo-preview .MathJax_Display {overflow-x:auto;overflow-y:hidden;}
 
+      .study-progress {margin:14px 0 6px;padding:13px 14px;border:1px solid #d9e1e8;border-radius:9px;background:#fbfcfe;}
+      .study-progress-title {font-weight:700;font-size:14px;margin-bottom:10px;}
+      .study-progress-header {display:grid;grid-template-columns:94px minmax(0,1fr);align-items:center;gap:8px;margin-bottom:10px;}
+      .study-progress-reset {font-size:11px;padding:5px 4px;width:94px;}
+      .study-progress-header .study-progress-title {margin-bottom:0;}
+      .study-progress-row {display:grid;grid-template-columns:94px minmax(0,1fr) 98px;align-items:center;gap:8px;margin:9px 0;}
+      .study-progress-name {font-size:12px;font-weight:600;}
+      .study-progress-track {height:16px;border-radius:9px;background:#e7ecf1;overflow:hidden;box-shadow:inset 0 1px 2px #ccd4df;}
+      .study-progress-fill {height:100%;border-radius:9px;min-width:0;transition:width .35s ease;}
+      .study-progress-count {text-align:right;font-size:12px;color:#485568;font-variant-numeric:tabular-nums;white-space:nowrap;}
+      .study-progress-note {font-size:11px;color:#697687;margin-top:10px;}
+      @media(max-width:600px){.study-progress-row{grid-template-columns:72px minmax(0,1fr) 82px;gap:5px;}.study-progress-name,.study-progress-count{font-size:11px;}}
       .difficulty-row {display:flex;gap:7px;flex-wrap:wrap;margin:9px 0;}
       .difficulty-row .btn {flex:1 1 26%;padding:8px 5px;}
       .difficulty-help {font-size:12px;color:#67717c;margin:7px 0 12px;}
@@ -619,6 +675,16 @@ ui <- fluidPage(
         )
       ),
       hr(),
+      strong('5과목 · 독학 학습 경로'),
+      p('선행 개념 → 기초 → 응용 순서 (자동 잠정 분류, 추가 확인 문항은 맨 뒤)'),
+      selectInput('learning_subject', '학습 경로 과목',
+                  choices=stats::setNames(c('audit','software','database','system','security'),
+                                          subject_names[c('audit','software','database','system','security')]),
+                  selected='software'),
+      actionButton('start_learning_path', '선택 과목 학습 경로 시작', class='btn-success'),
+      actionButton('stop_learning_path', '학습 경로 종료'),
+      textOutput('learning_path_status'),
+      hr(),
       strong('과목별 세부 영역(Domain) 문제풀이'),
       selectInput('domain_subject', '과목', choices=stats::setNames(names(domain_groups), subject_names[names(domain_groups)]), selected='audit'),
       selectInput('domain_select', '세부 영역', choices=domain_choices('audit'), selected='법령 및 제도'),
@@ -647,10 +713,34 @@ server <- function(input, output, session) {
   active_subject <- reactiveVal('all')
   active_scope <- reactiveVal('local')
   active_domain <- reactiveVal('')
+  learning_path_mode <- reactiveVal(FALSE)
   review_only <- reactiveVal(FALSE)
   difficulty_version <- reactiveVal(0L)
   bookmark_version <- reactiveVal(0L)
+  study_progress_version <- reactiveVal(0L)
   startup_restoring <- reactiveVal(TRUE)
+  observeEvent(input$reset_study_progress_btn, {
+    showModal(modalDialog(
+      title='학습 진도율을 초기화할까요?',
+      '5과목 전체의 완료 문항 기록을 0개로 초기화합니다. 기존 메모, 난이도, 북마크 및 답안 기록은 그대로 유지됩니다.',
+      footer=tagList(
+        modalButton('취소'),
+        actionButton('confirm_reset_study_progress', '진도율 초기화', class='btn-danger')
+      ),
+      easyClose=TRUE
+    ))
+  })
+  observeEvent(input$confirm_reset_study_progress, {
+    removeModal()
+    tryCatch({
+      reset_study_progress()
+      study_progress_version(study_progress_version() + 1L)
+      showNotification('5과목 학습 진도율을 0%로 초기화했습니다.', type='message')
+    }, error=function(e) {
+      showNotification(paste('진도율 초기화 오류:', conditionMessage(e)), type='error')
+    })
+  })
+
   bookmark_status <- function(scope) {
     bookmark_version()
     b <- read_bookmarks()[[scope]]
@@ -759,8 +849,55 @@ server <- function(input, output, session) {
         is.character(val) && length(val) == 1L && val %in% c('medium', 'hard')
       }, logical(1))]
     }
+    if (learning_path_mode() && length(ids)) {
+      plan <- read_learning_path()
+      if (!is.null(plan)) {
+        plan <- plan[plan$subject == subject_names[[active_subject()]], , drop=FALSE]
+        keys <- paste(q$year[ids], q$number[ids])
+        ord <- plan$learning_order[match(keys, paste(plan$year,plan$number))]
+        ids <- ids[order(is.na(ord), ord)]
+      }
+    }
     ids
   })
+  output$learning_path_status <- renderText({
+    if (!learning_path_mode()) return('학습 경로: 사용 안 함')
+    q <- questions(); plan <- read_learning_path()
+    if (is.null(q) || is.null(plan)) return('학습 경로 자료 없음')
+    plan <- plan[plan$subject == subject_names[[active_subject()]], , drop=FALSE]
+    i <- current()
+    ix <- match(paste(q$year[i],q$number[i]),paste(plan$year,plan$number))
+    if (is.na(ix)) return('현재 문항의 학습 단계 정보 없음')
+    sprintf('%d/%d · %s → %s · %s (분류 신뢰도: %s)',
+      match(i,subject_indices()), length(subject_indices()),
+      plan$chapter[ix],plan$concept[ix],plan$level[ix],plan$confidence[ix])
+  })
+  observeEvent(input$start_learning_path, {
+    plan <- read_learning_path()
+    if (is.null(plan) || !nrow(plan)) {
+      showNotification('all_subject_learning_paths.csv 파일을 찾지 못했습니다.',type='warning'); return()
+    }
+    q <- load_all_cached_images()
+    if (is.null(q)) {
+      showNotification('www/auto_questions 아래 문제 이미지가 필요합니다.',type='warning'); return()
+    }
+    id <- input$learning_subject
+    if (is.null(id) || !(id %in% c('audit','software','database','system','security'))) return()
+    if (!any(plan$subject == subject_names[[id]])) {
+      showNotification('선택 과목의 학습 순서표가 없습니다.', type='warning'); return()
+    }
+    questions(q); active_scope('global'); active_subject(id)
+    active_domain(''); review_only(FALSE); learning_path_mode(TRUE)
+    picked(rep(NA_integer_,nrow(q))); checked(rep(FALSE,nrow(q)))
+    eligible <- subject_indices()
+    if (!length(eligible)) {
+      learning_path_mode(FALSE)
+      showNotification('선택 과목에 저장된 문제 이미지가 없습니다.', type='warning'); return()
+    }
+    current(eligible[1])
+    finished(FALSE); image_version(image_version()+1L)
+  })
+  observeEvent(input$stop_learning_path, { learning_path_mode(FALSE) })
   output$subject_status <- renderText({
     scope_name <- if (active_scope() == 'global') '전체 연도 이미지' else '현재 PDF'
     paste0('현재 모드: ', scope_name, ' / ', subject_names[[active_subject()]],
@@ -783,6 +920,7 @@ server <- function(input, output, session) {
           checked(rep(FALSE, nrow(q)))
         }
         active_scope('local')
+        learning_path_mode(FALSE)
         review_only(FALSE)
         active_subject(id)
         active_domain('')
@@ -804,6 +942,7 @@ server <- function(input, output, session) {
         }
         questions(q)
         active_scope('global')
+        learning_path_mode(FALSE)
         review_only(FALSE)
         active_subject(id)
         active_domain('')
@@ -860,6 +999,7 @@ server <- function(input, output, session) {
     }
     active_scope(scope)
     active_subject(id)
+    learning_path_mode(FALSE)
     review_only(FALSE)
     active_domain(d)
     current(ids[1])
@@ -1050,7 +1190,15 @@ server <- function(input, output, session) {
     if (is.na(a) || !a %in% 1:4) return()
     v <- picked(); v[current()] <- a; picked(v)
   }, ignoreInit=TRUE)
-  observeEvent(input$check_btn, { q <- questions(); if (is.null(q)) return(); v <- checked(); v[current()] <- TRUE; checked(v) })
+  observeEvent(input$check_btn, {
+    q <- questions(); if (is.null(q)) return()
+    n <- current()
+    v <- checked(); v[n] <- TRUE; checked(v)
+    tryCatch({
+      record_study_progress(q$year[n], q$number[n])
+      study_progress_version(study_progress_version() + 1L)
+    }, error=function(e) showNotification(paste('진도 저장 오류:', conditionMessage(e)), type='error'))
+  })
   move <- function(delta) {
     eligible <- subject_indices()
     if (!length(eligible)) return()
@@ -1220,6 +1368,41 @@ server <- function(input, output, session) {
     div(class='memo-preview', HTML(rendered))
   })
 
+  # 현재 문제 필터와 무관한 전체 2015~2025년 학습 진도(5과목 총 1320문항)
+  output$study_progress_ui <- renderUI({
+    study_progress_version()
+    keys <- read_study_progress()
+    ids <- c('audit','software','database','system','security')
+    names_short <- c('감리·사업관리','소프트웨어','데이터베이스','시스템구조','보안')
+    palette <- c('#3586db','#10a68a','#ed9b31','#8065cb','#e26783')
+    total <- vapply(ids, function(id) length(subject_ranges[[id]]) * 11L, integer(1))
+    numbers <- suppressWarnings(as.integer(sub('^.*_', '', keys)))
+    done <- vapply(ids, function(id) sum(!is.na(numbers) & numbers %in% subject_ranges[[id]]), integer(1))
+    rows <- lapply(seq_along(ids), function(i) {
+      percent <- if (total[i]) 100 * done[i] / total[i] else 0
+      div(class='study-progress-row',
+        span(class='study-progress-name', names_short[i]),
+        div(class='study-progress-track', role='progressbar',
+            `aria-label`=paste0(names_short[i], ' 학습 진도'),
+            `aria-valuenow`=done[i], `aria-valuemin`='0', `aria-valuemax`=total[i],
+            div(class='study-progress-fill',
+                style=sprintf('width:%.2f%%;background:%s;',percent,palette[i]))),
+        span(class='study-progress-count', sprintf('%d/%d (%.1f%%)',done[i],total[i],percent))
+      )
+    })
+    div(class='study-progress',
+      div(class='study-progress-header',
+        actionButton('reset_study_progress_btn', '진도율 초기화',
+                     class='btn-default study-progress-reset'),
+        div(class='study-progress-title',
+            sprintf('5과목 전체 학습 진도 · %d / %d문항 (%.1f%%)',
+                    sum(done),sum(total),100*sum(done)/sum(total)))),
+      rows,
+      div(class='study-progress-note',
+          '정답 확인을 누르면 1문항 완료 · 같은 문제 반복 학습은 중복 제외 · 자동 저장: cbt_study_progress.rds')
+    )
+  })
+
   output$main_ui <- renderUI({
     q <- questions()
     if (is.null(q)) {
@@ -1244,7 +1427,8 @@ server <- function(input, output, session) {
           div(class='actionbar', actionButton('prev_btn', '이전 (P)'),
             actionButton('check_btn', '정답 확인 (C)', class='btn-primary'),
             actionButton('next_btn', '다음 (N)'), actionButton('finish_btn', '결과 보기', class='btn-success')),
-          uiOutput('feedback')
+          uiOutput('feedback'),
+          uiOutput('study_progress_ui')
         ),
         div(class='study-memo',
           uiOutput('difficulty_ui'),
