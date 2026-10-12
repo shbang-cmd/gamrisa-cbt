@@ -479,8 +479,8 @@ ui <- fluidPage(
       .study-memo {flex:0 0 34%;min-width:230px;position:sticky;top:12px;border:1px solid #d7dde4;border-radius:8px;padding:14px;background:#fafbfc;}
       .memo-editor {width:100%;min-height:520px;resize:vertical;font-size:14px;line-height:1.6;border:1px solid #bcc6d0;border-radius:5px;padding:10px;}
       .memo-status {font-size:12px;color:#67717c;margin-top:8px;}
-      .memo-tabs {display:flex;gap:6px;margin:9px 0;}
-      .memo-tabs .btn.active {background:#176aa3;color:white;border-color:#176aa3;}
+      .memo-preview-pane {cursor:text;}
+      .memo-preview-hint {font-size:12px;color:#67717c;margin:9px 0 6px;}
       .memo-preview {min-height:520px;max-height:72vh;overflow:auto;border:1px solid #bcc6d0;border-radius:5px;padding:12px;background:white;line-height:1.7;overflow-wrap:anywhere;}
       .memo-preview table {border-collapse:collapse;max-width:100%;}
       .memo-preview th,.memo-preview td {border:1px solid #ddd;padding:5px;}
@@ -523,33 +523,43 @@ ui <- fluidPage(
       if(memoTimer)clearTimeout(memoTimer);
       memoTimer=setTimeout(function(){sendMemo(el);},600);
     });
+    // 평소에는 수식 미리보기를 표시하고, 미리보기를 클릭하면 편집합니다.
+    function showMemoMode(mode, requestPreview){
+      var editor=document.querySelector('.memo-editor');
+      var editing=document.getElementById('memo_edit_pane');
+      var preview=document.getElementById('memo_preview_pane');
+      if(!editor || !editing || !preview)return;
+      editing.style.display=mode==='edit'?'':'none';
+      preview.style.display=mode==='edit'?'none':'';
+      if(mode==='preview' && requestPreview && window.Shiny){
+        sendMemo(editor);
+        Shiny.setInputValue('memo_preview_request',{
+          year:editor.dataset.year,number:Number(editor.dataset.number),
+          text:editor.value,nonce:Date.now()
+        },{priority:'event'});
+      }
+      if(mode==='edit')editor.focus();
+    }
     document.addEventListener('focusout',function(e){
-      if(e.target.classList.contains('memo-editor'))sendMemo(e.target);
+      if(!e.target.classList.contains('memo-editor'))return;
+      sendMemo(e.target);
+      // 포커스를 다른 곳으로 옮기면 자동으로 수식 보기 모드로 복귀합니다.
+      setTimeout(function(){
+        if(document.activeElement!==e.target)showMemoMode('preview',true);
+      },0);
     });
     document.addEventListener('click',function(e){
-      var toggle=e.target.closest && e.target.closest('[data-memo-tab]');
-      if(toggle){
-        e.preventDefault();
-        var tab=toggle.dataset.memoTab;
-        var editor=document.querySelector('.memo-editor');
-        var editing=document.getElementById('memo_edit_pane');
-        var preview=document.getElementById('memo_preview_pane');
-        if(editor && editing && preview){
-          editing.style.display=tab==='preview'?'none':'';
-          preview.style.display=tab==='preview'?'':'none';
-          document.querySelectorAll('[data-memo-tab]').forEach(function(el){el.classList.toggle('active',el.dataset.memoTab===tab);});
-          if(tab==='preview' && window.Shiny){
-            sendMemo(editor);
-            Shiny.setInputValue('memo_preview_request',{
-              year:editor.dataset.year,number:Number(editor.dataset.number),
-              text:editor.value,nonce:Date.now()
-            },{priority:'event'});
-          }
-        }
+      if(e.target.closest && e.target.closest('#memo_preview_pane')){
+        showMemoMode('edit',false);
         return;
       }
       if(e.target.classList.contains('qimg'))e.target.classList.toggle('enlarged');
       if(e.target.id==='memo_save_btn')sendMemo(document.querySelector('.memo-editor'));
+    });
+    // 문제 전환·앱 시작마다 새로운 문제의 메모를 미리보기로 불러옵니다.
+    $(document).on('shiny:value',function(e){
+      if(e.target.id!=='main_ui')return;
+      setTimeout(function(){showMemoMode('preview',true);},100);
     });
     // Shiny가 미리보기 HTML을 새로 그릴 때 MathJax 수식을 다시 조판합니다.
     $(document).on('shiny:value',function(e){
@@ -1192,7 +1202,7 @@ server <- function(input, output, session) {
     rendered
   }
 
-  # 미리보기는 버튼을 눌렀을 때만 갱신: 기존 메모 RDS 구조는 바꾸지 않습니다.
+  # 메모 포커스가 사라지거나 문제가 바뀔 때 미리보기를 갱신합니다.
   # HTML 태그는 먼저 이스케이프해 AI 답변에 들어간 HTML 실행을 막습니다.
   output$memo_preview_ui <- renderUI({
     req(input$memo_preview_request)
@@ -1241,15 +1251,13 @@ server <- function(input, output, session) {
           tags$hr(),
           h4('문제별 학습 메모'),
           p(class='text-muted', sprintf('%s년 %d번 전용', q$year[n], q$number[n])),
-          div(class='memo-tabs',
-            tags$button('편집', type='button', class='btn btn-default active', `data-memo-tab`='edit'),
-            tags$button('수식 미리보기', type='button', class='btn btn-default', `data-memo-tab`='preview')),
-          div(id='memo_edit_pane',
+          div(class='memo-preview-hint', '미리보기를 클릭하면 편집 · 편집창 밖을 클릭하면 수식 미리보기'),
+          div(id='memo_edit_pane', style='display:none;',
             tags$textarea(memo_content, class='memo-editor', id='memo_text',
               `data-year`=as.character(q$year[n]),
               `data-number`=as.character(q$number[n]),
               placeholder='Gemini 해설, Markdown, LaTeX 수식을 붙여넣으세요.')),
-          div(id='memo_preview_pane', style='display:none;',
+          div(id='memo_preview_pane', class='memo-preview-pane',
             uiOutput('memo_preview_ui')),
           tags$button(id='memo_save_btn', type='button', class='btn btn-default', '지금 저장'),
           div(class='memo-status', '입력 후 약 0.6초에 자동 저장 · 문제 이동 시에도 저장'),
