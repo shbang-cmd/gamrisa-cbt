@@ -555,6 +555,79 @@ ui <- fluidPage(
       .difficulty-help {font-size:12px;color:#67717c;margin:7px 0 12px;}
       .review-btn {width:100%;margin:5px 0 14px;}
       @media(max-width:900px){.study-layout{flex-direction:column;}.study-question,.study-memo{width:100%;flex:auto;}.study-memo{position:static;}}
+
+      /* Excel-style focus view: cosmetic only; the Shiny application stays active. */
+      .cbt-view-toolbar {display:flex;align-items:center;gap:10px;margin:10px 0 16px;}
+      .cbt-view-toolbar .btn {border-color:#197347;}
+      .cbt-view-hint {font-size:12px;color:#60716a;}
+      .normal-zoom-control {display:inline-flex;align-items:center;gap:6px;margin-left:10px;white-space:nowrap;font-size:13px;}
+      .normal-zoom-control button {padding:4px 9px;border-radius:4px;border:1px solid #c0c9d0;background:#fff;cursor:pointer;}
+      .normal-zoom-control button:disabled {opacity:.4;cursor:default;}
+      .normal-zoom-control .normal-zoom-label {display:inline-block;min-width:45px;text-align:center;font-weight:600;}
+      body:not(.excel-mode) .qimg:not(.enlarged) {zoom:var(--normal-question-scale, 1);}
+      body.excel-mode .normal-zoom-control {display:none !important;}
+      #excel_shell, #excel_footer {display:none;}
+      body.excel-mode {background:#f5f7f5;font-family:Arial,"Malgun Gothic",sans-serif;}
+      body.excel-mode .container-fluid {padding-left:0;padding-right:0;}
+      body.excel-mode #cbt_normal_header, body.excel-mode .container-fluid > .row > .col-sm-4,
+      body.excel-mode .cbt-view-hint {display:none !important;}
+      body.excel-mode #excel_shell,body.excel-mode #excel_footer {display:block;}
+      body.excel-mode .cbt-view-toolbar {position:absolute;right:18px;top:7px;margin:0;z-index:10;}
+      body.excel-mode #excel_toggle {background:#ffffff;color:#176a43;border:1px solid #dadada;font-size:12px;padding:5px 11px;}
+      .excel-title {height:49px;background:#217346;color:white;display:flex;align-items:center;padding:0 16px;gap:15px;font-size:14px;font-weight:600;}
+      .excel-tile {background:#165b3b;padding:5px 9px;border-radius:3px;font-weight:bold;}
+      .excel-menu {height:38px;background:#fff;display:flex;align-items:center;gap:29px;padding:0 18px;border-bottom:1px solid #dce1de;font-size:13px;}
+      .excel-ribbon {height:64px;background:#fafafa;border-bottom:1px solid #d5dcd6;display:flex;align-items:center;gap:22px;padding:8px 20px;color:#4e5a52;font-size:12px;}
+      .excel-tool {border-right:1px solid #d6ddd6;padding-right:20px;}
+      .excel-formula {height:37px;background:#fff;display:flex;align-items:center;gap:14px;padding:0 14px;border-bottom:1px solid #d8ddd9;font-size:12px;}
+      .excel-name-box {width:65px;border:1px solid #cdd5d0;text-align:center;padding:4px 2px;}
+      .excel-fx {font-style:italic;color:#768179;}
+      body.excel-mode .container-fluid > .row > .col-sm-8 {width:100% !important;float:none !important;margin:0 !important;padding:16px 35px 25px 62px;min-height:67vh;
+        background-color:white;background-image:linear-gradient(to right,#e9eee9 1px,transparent 1px),linear-gradient(to bottom,#e9eee9 1px,transparent 1px);
+        background-size:97px 28px;}
+      body.excel-mode .study-memo,body.excel-mode .study-progress,
+      body.excel-mode .study-question>.text-muted {display:none !important;}
+      body.excel-mode .study-layout {display:block;}
+      body.excel-mode .study-question {width:100%;max-width:1050px;background:#fff;padding:12px 20px;border:1px solid #cad9cb;box-shadow:0 2px 6px #00000012;}
+      body.excel-mode #main_ui>h3 {font-size:16px;font-weight:600;color:#246b49;background:#fff;margin:2px 0 0;padding:12px 20px;max-width:1050px;border:1px solid #cad9cb;border-bottom:0;}
+      /* Spreadsheet grid underneath the white PNG: multiply blending makes white pixels reveal grid lines,
+         while dark question text remains dark. Original PNG files are never modified. */
+      body.excel-mode .study-question {background-color:#fff;
+        background-image:linear-gradient(to right,#e3eae4 1px,transparent 1px),linear-gradient(to bottom,#e3eae4 1px,transparent 1px);
+        background-size:92px 26px;box-shadow:none;border:1px solid #bbd7c3;}
+      body.excel-mode .qwrap {margin:5px 0 12px;max-height:60vh;text-align:left;
+        background-color:white;
+        background-image:linear-gradient(to right,#dfe8e1 1px,transparent 1px),linear-gradient(to bottom,#dfe8e1 1px,transparent 1px);
+        background-size:92px 26px;}
+      body.excel-mode .qwrap .qimg {mix-blend-mode:multiply;}
+      body.excel-mode .container-fluid > .row > .col-sm-8 {padding-bottom:105px;}
+      .excel-column-headers {display:flex;height:25px;border-bottom:1px solid #d9e2dc;background:#f7f8f7;color:#5c6660;font-size:11px;overflow:hidden;}
+      .excel-column-headers span {box-sizing:border-box;width:92px;flex:0 0 92px;text-align:center;padding:4px 0;border-right:1px solid #dce4df;}
+      .excel-column-headers span:first-child {width:44px;flex-basis:44px;background:#ecefec;}
+      body.excel-mode #excel_footer {position:fixed;bottom:0;left:0;right:0;z-index:30;box-shadow:0 -2px 5px #00000009;}
+      .excel-tabs {height:34px;display:flex;align-items:stretch;background:#f4f6f4;border-top:1px solid #cdd9d0;padding-left:10px;gap:0;}
+      .excel-tabs .excel-tab-nav {font-size:16px;color:#63726a;padding:7px 11px;}
+      .excel-tabs .excel-tab {display:flex;align-items:center;padding:0 17px;border-right:1px solid #dbe2db;color:#5c6c60;font-size:12px;white-space:nowrap;}
+      .excel-tabs .excel-tab.active {background:#fff;color:#186b43;border-bottom:3px solid #217346;font-weight:700;}
+      .excel-tabs .excel-tab-add {font-size:18px;padding:5px 12px;color:#6f7e73;}
+      .excel-statusbar {height:30px !important;}
+      .excel-sheet {background:transparent !important;border:0 !important;padding:0 !important;font-weight:normal !important;color:inherit !important;}
+
+      body.excel-mode .qimg:not(.enlarged) {margin:0;zoom:var(--excel-question-scale, .9);max-width:100%;} /* 엑셀 모드: 10% 단위 확대/축소 */
+      .excel-zoom-control {display:flex;align-items:center;gap:7px;margin-left:auto;white-space:nowrap;}
+      .excel-zoom-control button {background:#fff;border:1px solid #b7c6bb;border-radius:3px;padding:5px 10px;color:#245e3c;font-weight:bold;cursor:pointer;}
+      .excel-zoom-control button:disabled {opacity:.35;cursor:default;}
+      .excel-zoom-control .excel-zoom-label {display:inline-block;min-width:44px;text-align:center;font-weight:bold;}
+      body.excel-mode .shiny-input-radiogroup {margin:0 0 7px;}
+      body.excel-mode .shiny-input-radiogroup>label {font-size:12px;color:#526159;}
+      body.excel-mode .actionbar {margin:8px 0 12px;gap:6px;}
+      body.excel-mode .actionbar .btn {background:#f7faf7;color:#25583d;border:1px solid #a6bbaa;border-radius:2px;font-size:12px;}
+      body.excel-mode .actionbar #check_btn {background:#217346;color:white;}
+      body.excel-mode #feedback .alert {padding:7px 12px;font-size:12px;}
+      .excel-statusbar {height:37px;border-top:1px solid #ced8cf;background:#f7f9f7;display:flex;align-items:center;justify-content:space-between;padding:0 20px;color:#53655a;font-size:12px;}
+      .excel-sheet {background:white;border-bottom:2px solid #217346;padding:9px 18px;color:#217346;font-weight:600;}
+      @media(max-width:700px){.excel-ribbon{height:auto;gap:8px;flex-wrap:wrap;}.excel-menu{gap:12px;}.excel-title{font-size:12px;}body.excel-mode .container-fluid > .row > .col-sm-8{padding:12px 8px;}body.excel-mode .cbt-view-toolbar{right:8px;}}
+
     ')),
     tags$script(HTML("document.addEventListener('keydown',function(e){
       if(e.repeat||e.ctrlKey||e.altKey||e.metaKey||e.isComposing)return;
@@ -570,6 +643,54 @@ ui <- fluidPage(
         if(id){var b=document.getElementById(id);if(b){e.preventDefault();b.click();}}
       }
     });
+    // UI-only scale: modify only the Excel-mode question image, not the Shiny server state.
+    var excelZoom=90;
+    function updateExcelZoom(){
+      document.documentElement.style.setProperty('--excel-question-scale',String(excelZoom/100));
+      var label=document.getElementById('excel_zoom_value');
+      if(label)label.textContent=excelZoom+'%';
+      var smaller=document.getElementById('excel_zoom_out');
+      var larger=document.getElementById('excel_zoom_in');
+      if(smaller)smaller.disabled=excelZoom<=40;
+      if(larger)larger.disabled=excelZoom>=100;
+    }
+    document.addEventListener('click',function(e){
+      var id=e.target && e.target.id;
+      if(id==='excel_zoom_out'||id==='excel_zoom_in'){
+        excelZoom=Math.max(40,Math.min(100,excelZoom+(id==='excel_zoom_out'?-10:10)));
+        updateExcelZoom();
+      }
+    });
+    document.addEventListener('DOMContentLoaded',updateExcelZoom);
+    // Normal CBT image scaling (separate from Excel mode; persisted during question navigation).
+    var normalZoom=100;
+    function updateNormalZoom(){
+      document.documentElement.style.setProperty('--normal-question-scale',String(normalZoom/100));
+      var label=document.getElementById('normal_zoom_value');
+      if(label)label.textContent=normalZoom+'%';
+      var smaller=document.getElementById('normal_zoom_out');
+      var larger=document.getElementById('normal_zoom_in');
+      if(smaller)smaller.disabled=normalZoom<=40;
+      if(larger)larger.disabled=normalZoom>=150;
+    }
+    document.addEventListener('click',function(e){
+      var id=e.target && e.target.id;
+      if(id==='normal_zoom_out'||id==='normal_zoom_in'){
+        normalZoom=Math.max(40,Math.min(150,normalZoom+(id==='normal_zoom_out'?-10:10)));
+        updateNormalZoom();
+      }
+    });
+    document.addEventListener('DOMContentLoaded',updateNormalZoom);
+    // CSS-only switch: retain the current question, selected answer and all server state.
+    function setExcelMode(enabled){
+      document.body.classList.toggle('excel-mode',enabled);
+      var btn=document.getElementById('excel_toggle');
+      if(btn){btn.textContent=enabled?'일반 CBT로 복귀':'엑셀 위장 전환';btn.setAttribute('aria-pressed',String(enabled));}
+    }
+    document.addEventListener('click',function(e){
+      if(e.target && e.target.id==='excel_toggle')setExcelMode(!document.body.classList.contains('excel-mode'));
+    });
+
     // 메모는 현재 입력 중인 문제의 key와 함께 전송하여 문제 이동 시 섞이지 않게 합니다.
     var memoTimer=null;
     function sendMemo(el){
@@ -656,8 +777,35 @@ ui <- fluidPage(
     });")),
     withMathJax()
   ),
-  titlePanel('정보시스템감리사 기출 CBT (2015~2025)'),
-  p('정답 제거 PDF 선택 후 불러오면, 저장된 120개 이미지가 있으면 재사용하고 없으면 새로 생성합니다.'),
+  div(id='excel_shell',
+    div(class='excel-title', span(class='excel-tile', 'X'),
+        span('학습자료 관리 - 통합 문서'),
+        span(style='margin-left:auto;margin-right:140px;font-size:12px;font-weight:normal;', '자동 저장')),
+    div(class='excel-menu', span('파일'), span('홈'), span('삽입'), span('페이지 레이아웃'), span('수식'), span('데이터'), span('검토')),
+    div(class='excel-ribbon',
+        span(class='excel-tool', '붙여넣기　 클립보드'),
+        span(class='excel-tool', '글꼴　 11　 굵게'),
+        span(class='excel-tool', '맞춤　 가운데'),
+        span(class='excel-tool', '표시 형식　 일반'),
+        div(class='excel-zoom-control',
+            span('문제 크기'),
+            tags$button(id='excel_zoom_out', type='button', `aria-label`='문제 크기 10% 축소', '−10%'),
+            span(id='excel_zoom_value', class='excel-zoom-label', '90%'),
+            tags$button(id='excel_zoom_in', type='button', `aria-label`='문제 크기 10% 확대', '+10%'))),
+    div(class='excel-formula',span(class='excel-name-box','B8'),span(class='excel-fx','fx'),span('기출문제 학습 내용')),
+    div(class='excel-column-headers', lapply(c('',LETTERS[1:14]), function(x) span(x)))),
+  div(class='cbt-view-toolbar',
+      tags$button(id='excel_toggle',type='button',class='btn btn-default',
+                  `aria-pressed`='false','엑셀 위장 전환'),
+      span(class='cbt-view-hint','화면 형태만 변경 · 문제 위치와 답안 유지'),
+      div(class='normal-zoom-control',
+          span('문제 크기'),
+          tags$button(id='normal_zoom_out', type='button', `aria-label`='일반 CBT 문제 10% 축소', '−10%'),
+          span(id='normal_zoom_value', class='normal-zoom-label', '100%'),
+          tags$button(id='normal_zoom_in', type='button', `aria-label`='일반 CBT 문제 10% 확대', '+10%'))),
+  div(id='cbt_normal_header',
+      titlePanel('정보시스템감리사 기출 CBT (2015~2025)'),
+      p('정답 제거 PDF 선택 후 불러오면, 저장된 120개 이미지가 있으면 재사용하고 없으면 새로 생성합니다.')),
   sidebarLayout(
     sidebarPanel(
       selectInput('pdf_file', '① 정답 제거 PDF 선택',
@@ -727,7 +875,18 @@ ui <- fluidPage(
       actionButton('clear_btn', '답안 초기화')
     ),
     mainPanel(uiOutput('main_ui'))
-  )
+  ),
+  div(id='excel_footer',
+      div(class='excel-tabs',
+          span(class='excel-tab-nav','‹　›'),
+          span(class='excel-tab active','학습자료'),
+          span(class='excel-tab','문항목록'),
+          span(class='excel-tab','정답기록'),
+          span(class='excel-tab','진도현황'),
+          span(class='excel-tab-add','+')),
+      div(class='excel-statusbar',
+          span(class='excel-sheet','준비'),
+          span('P 이전 · 1~4 답 선택 · C 채점 · N 다음　 |　 Excel 스타일')))
 )
 
 server <- function(input, output, session) {
