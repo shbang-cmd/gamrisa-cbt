@@ -533,6 +533,9 @@ ui <- fluidPage(
       .memo-preview-pane {cursor:text;}
       .memo-preview-hint {font-size:12px;color:#67717c;margin:9px 0 6px;}
       .memo-preview {min-height:520px;max-height:72vh;overflow:auto;border:1px solid #bcc6d0;border-radius:5px;padding:12px;background:white;line-height:1.7;overflow-wrap:anywhere;}
+      /* AI 풀이 복사 시 Markdown의 단일 줄바꿈(soft break)도 화면에서 보이도록 합니다. */
+      .memo-preview p, .memo-preview li, .memo-preview blockquote {white-space:pre-line;}
+      .memo-preview pre, .memo-preview code {white-space:pre-wrap;}
       .memo-preview table {border-collapse:collapse;max-width:100%;}
       .memo-preview th,.memo-preview td {border:1px solid #ddd;padding:5px;}
       .memo-preview img {max-width:100%;}
@@ -585,8 +588,40 @@ ui <- fluidPage(
       body.excel-mode .container-fluid > .row > .col-sm-8 {width:100% !important;float:none !important;margin:0 !important;padding:16px 35px 25px 62px;min-height:67vh;
         background-color:white;background-image:linear-gradient(to right,#e9eee9 1px,transparent 1px),linear-gradient(to bottom,#e9eee9 1px,transparent 1px);
         background-size:97px 28px;}
-      body.excel-mode .study-memo,body.excel-mode .study-progress,
+      body.excel-mode .study-progress,
       body.excel-mode .study-question>.text-muted {display:none !important;}
+      /* The memo panel is shown only when the ribbon checkbox is checked. */
+      body.excel-mode .study-memo {display:none !important;}
+      body.excel-mode.excel-memo-visible .study-memo {
+        display:block !important; flex:1 1 40%; width:40%; max-width:none; min-width:300px;
+        position:relative;top:auto;margin:0; padding:12px 14px;
+        border:1px solid #bbd7c3;border-radius:0;box-shadow:none;
+        background-color:#fff;
+        background-image:linear-gradient(to right,#e1e9e2 1px,transparent 1px),linear-gradient(to bottom,#e1e9e2 1px,transparent 1px);
+        background-size:92px 26px;
+      }
+      body.excel-mode.excel-memo-visible .study-layout {display:flex;gap:12px;align-items:flex-start;}
+      body.excel-mode.excel-memo-visible .study-question {flex:1 1 60%;width:60%;min-width:0;max-width:none;}
+      body.excel-mode .study-memo #difficulty_ui, body.excel-mode .study-memo .memo-hide-label,
+      body.excel-mode .study-memo .memo-title-row + .memo-hidden-notice {display:none !important;}
+      body.excel-mode.excel-memo-visible .study-memo.memo-hidden .memo-body {display:block;}
+      body.excel-mode .study-memo .memo-title-row h4 {font-size:14px;color:#1b6842;}
+      body.excel-mode .study-memo .memo-preview {
+        background-color:#fff;
+        background-image:linear-gradient(to right,#e1e9e2 1px,transparent 1px),linear-gradient(to bottom,#e1e9e2 1px,transparent 1px);
+        background-size:92px 26px;border:1px solid #c4d8c9;border-radius:0;
+        min-height:350px;max-height:68vh;overflow:auto;
+      }
+      body.excel-mode .study-memo .memo-editor {
+        background-color:#fff;
+        background-image:linear-gradient(to right,#e1e9e2 1px,transparent 1px),linear-gradient(to bottom,#e1e9e2 1px,transparent 1px);
+        background-size:92px 26px;border-radius:0;min-height:350px;
+      }
+      .excel-memo-control {display:flex;align-items:center;gap:7px;white-space:nowrap;cursor:pointer;margin:0;color:#245e3c;font-weight:600;}
+      .excel-memo-control input {margin:0;accent-color:#217346;}
+      @media(max-width:950px){body.excel-mode.excel-memo-visible .study-layout {flex-direction:column;}
+        body.excel-mode.excel-memo-visible .study-question,body.excel-mode.excel-memo-visible .study-memo {width:100%;flex:1 1 auto;}}
+
       body.excel-mode .study-layout {display:block;}
       body.excel-mode .study-question {width:100%;max-width:1050px;background:#fff;padding:12px 20px;border:1px solid #cad9cb;box-shadow:0 2px 6px #00000012;}
       body.excel-mode #main_ui>h3 {font-size:16px;font-weight:600;color:#246b49;background:#fff;margin:2px 0 0;padding:12px 20px;max-width:1050px;border:1px solid #cad9cb;border-bottom:0;}
@@ -682,8 +717,27 @@ ui <- fluidPage(
     });
     document.addEventListener('DOMContentLoaded',updateNormalZoom);
     // CSS-only switch: retain the current question, selected answer and all server state.
+    var excelMemoVisible=false;
+    function updateExcelMemoVisibility(){
+      document.body.classList.toggle('excel-memo-visible',excelMemoVisible);
+      var checkbox=document.getElementById('excel_memo_toggle');
+      if(checkbox)checkbox.checked=excelMemoVisible;
+      // Keep the regular CBT memo visible on return, even when its old hide toggle was used.
+      if(excelMemoVisible && document.body.classList.contains('excel-mode')){
+        memoHidden=false;
+        updateMemoVisibility();
+      }
+    }
+    document.addEventListener('change',function(e){
+      if(e.target && e.target.id==='excel_memo_toggle'){
+        excelMemoVisible=e.target.checked;
+        updateExcelMemoVisibility();
+        if(excelMemoVisible)showMemoMode('preview',true);
+      }
+    });
     function setExcelMode(enabled){
       document.body.classList.toggle('excel-mode',enabled);
+      updateExcelMemoVisibility();
       var btn=document.getElementById('excel_toggle');
       if(btn){btn.textContent=enabled?'일반 CBT로 복귀':'엑셀 위장 전환';btn.setAttribute('aria-pressed',String(enabled));}
     }
@@ -760,7 +814,7 @@ ui <- fluidPage(
     // 문제 전환·앱 시작마다 새로운 문제의 메모를 미리보기로 불러옵니다.
     $(document).on('shiny:value',function(e){
       if(e.target.id!=='main_ui')return;
-      setTimeout(function(){updateMemoVisibility();showMemoMode('preview',!memoHidden);},100);
+      setTimeout(function(){updateMemoVisibility();updateExcelMemoVisibility();showMemoMode('preview',!memoHidden);},100);
     });
     // Shiny가 미리보기 HTML을 새로 그릴 때 MathJax 수식을 다시 조판합니다.
     $(document).on('shiny:value',function(e){
@@ -787,6 +841,8 @@ ui <- fluidPage(
         span(class='excel-tool', '글꼴　 11　 굵게'),
         span(class='excel-tool', '맞춤　 가운데'),
         span(class='excel-tool', '표시 형식　 일반'),
+        tags$label(class='excel-memo-control',
+          tags$input(id='excel_memo_toggle', type='checkbox'), '오른쪽 해설 표시'),
         div(class='excel-zoom-control',
             span('문제 크기'),
             tags$button(id='excel_zoom_out', type='button', `aria-label`='문제 크기 10% 축소', '−10%'),
